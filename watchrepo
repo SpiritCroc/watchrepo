@@ -1,0 +1,344 @@
+#!/bin/sh
+#
+# Author:
+# SpiritCroc <spiritcroc@gmail.com>
+#
+
+workdir="$HOME/.watchrepo2"
+repodir="$workdir/repo"
+
+hidden_branch="nevereverchangethishiddenbranch"
+
+m_add=0
+config_add=""
+m_diff=0
+
+CL_CYAN="$(tput setaf 6)"
+CL_RED="$(tput setaf 1)"
+CL_YELLOW="$(tput setaf 3)"
+CL_BOLD="$(tput bold)"
+CL_CLR="$(tput sgr0)"
+CL_OUT="$CL_CYAN"
+CL_BRANCH="$CL_BOLD"
+CL_ADD="$CL_YELLOW"
+CL_REMOVE="$CL_YELLOW"
+CL_SAME="$CL_CYAN"
+CL_WRN="$CL_RED$CL_BOLD"
+
+show_usage() {
+    echo -e "Usage: $0 [(add ADDRESS) | list | (diff OWNER REPO BRANCH)]"
+    echo -e
+    echo -e "Example add usage:"
+    echo -e "\t$0 add https://github.com/sonyxperiadev/local_manifests/commits/master"
+}
+
+list_diff() {
+    cd "$repodir"
+    diff_branches 0
+    cd "$m_start_dir"
+}
+
+ensure_hidden_branch() {
+    if [ "$(git branch | grep \* | sed 's/\* //')" != "$hidden_branch" ]; then
+        git checkout "$hidden_branch" 2> /dev/null
+    fi
+}
+
+# Only call if $PWD = $repodir !
+acknowledge_branch() {
+    owner="$1"
+    repo="$2"
+    branch="$3"
+    cd "$owner/$repo" || exit $?
+    # Check if branch already exists
+    if git rev-parse --verify "$branch" > /dev/null 2> /dev/null; then
+        echo -e $CL_OUT"Updating $owner/$repo/$branch"$CL_CLR
+        ensure_hidden_branch
+        git branch -D "$branch"
+    else
+        echo -e $CL_OUT"Creating $owner/$repo/$branch"$CL_CLR
+    fi
+    git branch "$branch" "origin/$branch"
+    cd ../..
+}
+
+# Only call if $PWD = $owner/$repo !
+diff_branch() {
+    owner="$1"
+    repo="$2"
+    branch="$3"
+    fetch="$4"
+
+    if [ "$fetch" = 1 ]; then
+        git fetch origin
+    fi
+
+    local_rev="$(git rev-parse "$branch")"
+    remote_rev="$(git rev-parse "origin/$branch")"
+    if [ "$local_rev" = "$remote_rev" ]; then
+        echo -e $CL_SAME$CL_BRANCH"$owner/$repo/$branch"$CL_CLR$CL_SAME" is up-to-date."$CL_CLR
+    else
+        removecount="$(git log "$remote_rev".."$local_rev" --format=oneline | wc -l)"
+        if [ "$removecount" != "0" ]; then
+            echo -e $CL_REMOVE$CL_BRANCH"$owner/$repo/$branch"$CL_CLR$CL_REMOVE" has $removecount removed commits"$CL_CLR
+        fi
+        addcount="$(git log "$local_rev".."$remote_rev" --format=oneline | wc -l)"
+        if [ "$addcount" != 0 ]; then
+            echo -e $CL_ADD$CL_BRANCH"$owner/$repo/$branch"$CL_CLR$CL_ADD" has $addcount new commits"$CL_CLR
+        fi
+        if [ "$removecount" != "0" ] || [ "$addcount" != "0" ]; then
+            # View command to view diff
+            echo -e $CL_OUT"\t$0 diff $owner $repo $branch"$CL_CLR
+        fi
+    fi
+}
+
+# Only call if $PWD = $repodir !
+diff_full_branch() {
+    owner="$1"
+    repo="$2"
+    branch="$3"
+    cd "$owner/$repo" || return $?
+    local_rev="$(git rev-parse "$branch")"
+    remote_rev="$(git rev-parse "origin/$branch")"
+    if [ "$local_rev" = "$remote_rev" ]; then
+        echo -e $CL_SAME$CL_BRANCH"$owner/$repo/$branch"$CL_CLR$CL_SAME" is up-to-date."$CL_CLR
+    else
+        removed="$(git log --reverse "$remote_rev".."$local_rev" --format=oneline | sed 's/ .*//')"
+        added="$(git log --reverse "$local_rev".."$remote_rev" --format=oneline | sed 's/ .*//')"
+        if [ ! -z "$removed" ]; then
+            echo $CL_OUT"Overview: Removed commits (old->new):"$CL_CLR
+            while read commit; do
+                git log "$commit" -n 1 --format=oneline
+            done <<< "$removed"
+        fi
+        if [ ! -z "$added" ]; then
+            echo $CL_OUT"Overview: Added commits (old->new):"$CL_CLR
+            while read commit; do
+                git log "$commit" -n 1 --format=oneline
+            done <<< "$added"
+        fi
+        if [ ! -z "$removed" ]; then
+            echo $CL_OUT"Removed commits (old->new): $(diff_full_commit_help)"$CL_CLR
+            while read commit; do
+                diff_full_commit . "$commit"
+            done <<< "$removed"
+        fi
+        if [ ! -z "$added" ]; then
+            echo $CL_OUT"Added commits (old->new): $(diff_full_commit_help)"$CL_CLR
+            while read commit; do
+                diff_full_commit . "$commit"
+            done <<< "$added"
+        fi
+        unset REPLY
+        while true; do
+            echo
+            read -p "Acknowledge diffs? [y/n]: "
+            if [ "$REPLY" = "y" ] || [ "$REPLY" = "z" ] || [ "$REPLY" = "j" ] || [ "$REPLY" = "Y" ] || [ "$REPLY" = "Z" ] || [ "$REPLY" = "J" ]; then
+                cd ../..
+                acknowledge_branch "$owner" "$repo" "$branch"
+                return
+            fi
+            if [ "$REPLY" = "n" ] || [ "$REPLY" = "N" ]; then
+                break
+            fi
+        done
+    fi
+    cd ../..
+}
+
+diff_full_commit_help() {
+    echo -n "Enter s to show full commit, m to show full message, "
+    echo " enter to continue"
+}
+
+# Only call if $PWD = $repodir !
+diff_full_commit() {
+    submoduledir="$1"
+    commit="$2"
+    previous="$(pwd)"
+    cd "$submoduledir" || exit 1
+    git log "$commit" --format=oneline -n 1
+    REPLY="nothing"
+    while [ ! -z "$REPLY" ]; do
+        read -p "> " </dev/tty
+        if [ "$REPLY" = "s" ]; then
+            git show "$commit"
+        elif [ "$REPLY" = "m" ]; then
+            git log "$commit" -n 1
+        elif [ ! -z "$REPLY" ]; then
+            echo "Don't know command $REPLY"
+        fi
+    done
+    cd "$previous"
+}
+
+# Only call if $PWD = $repodir !
+diff_branches() {
+    fetch="$1"
+    if [ -z "$fetch" ]; then
+        fetch=1
+    fi
+    for dir in *; do
+        if [ -d "$dir" ]; then
+            cd "$dir"
+            for dir2 in *; do
+                if [ -d "$dir2" ]; then
+                    cd "$dir2"
+                    ensure_hidden_branch
+                    branches=$(git branch | sed "s;.* ;;")
+                    for branch in $branches; do
+                        branch="$(echo "$branch")"
+                        if [ "$branch" != $hidden_branch ]; then
+                            diff_branch "$dir" "$dir2" "$branch" "$fetch"
+                        fi
+                    done
+                    cd ..
+                fi
+            done
+            cd ..
+        fi
+    done
+}
+
+add_repo_guess() {
+    full_address="$1"
+    cd "$repodir"
+
+    info="$(echo "$full_address" | sed "s;.*.com/;;")"
+    IFS='/' read -r -a infos <<< "$info"
+    owner="${infos[0]}"
+    repo="${infos[1]}"
+    branch="${infos[3]}"
+    address="$(echo "$full_address" | sed "s;$info;;")$owner/$repo"
+    echo "Address: $address"
+    echo "Branch: $branch"
+    unset REPLY
+    read -p "Is this correct? [Y/n]: "
+    if [ "$REPLY" = "n" ] || [ "$REPLY" = "N" ]; then
+        add_repo_prompt $owner $repo $branch $address
+    else
+        add_repo $owner $repo $branch $address
+    fi
+}
+
+add_repo_prompt() {
+    owner="$1"
+    repo="$2"
+    branch="$3"
+    address="$4"
+    unset REPLY
+    read -p "Enter repo owner name ($owner): "
+    if [ ! -z "$REPLY" ]; then
+        owner="$REPLY"
+    fi
+    unset REPLY
+    read -p "Enter repo name ($repo): "
+    if [ ! -z "$REPLY" ]; then
+        repo="$REPLY"
+    fi
+    unset REPLY
+    read -p "Enter remote branch ($branch): "
+    if [ ! -z "$REPLY" ]; then
+        branch="$REPLY"
+    fi
+    unset REPLY
+    read -p "Enter git address ($address): "
+    if [ ! -z "$REPLY" ]; then
+        address="$REPLY"
+    fi
+    add_repo $owner $repo $branch $address
+}
+
+add_repo() {
+    owner="$1"
+    repo="$2"
+    branch="$3"
+    address="$4"
+    module="$owner/$repo"
+    if [ -d "$module" ]; then
+        cd "$module"
+        existing_address="$(git remote get-url origin 2>/dev/null)"
+        if [ "$existing_address" != "$address" ]; then
+            echo -e $CL_WRN"$module already exists, but with different address ($existing_address). Exiting..."$CL_CLR
+            exit 1
+        else
+            echo -e $CL_OUT"$module already exists"$CL_CLR
+        fi
+    else
+        echo -e $CL_OUT"Adding $module..."$CL_CLR
+        mkdir -p "$owner"
+        git submodule add "$address" "$module"
+        cd "$module"
+        git checkout --orphan $hidden_branch 2> /dev/null
+        git commit --allow-empty -m "Placeholder empty branch"
+    fi
+
+    echo -e $CL_OUT"Updating remote..."$CL_CLR
+    git fetch origin
+
+    cd ../..
+    echo -e $CL_OUT"Acknowledging current state..."$CL_CLR
+    acknowledge_branch "$owner" "$repo" "$branch"
+
+    cd "$m_start_dir"
+}
+
+m_start_dir="$PWD"
+mkdir -p "$workdir" || exit 1
+
+if [ ! -d "$repodir" ]; then
+    mkdir -p "$repodir" || exit 1
+    cd "$repodir"
+    # Create git repo
+    git init
+    # Create empty master branch to checkout
+    git commit --allow-empty -m "Initial empty"
+    cd "$m_start_dir"
+fi
+
+for arg; do
+    if [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$arg" = "list" ]; then
+        list_diff
+        exit 0
+    elif [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$arg" = "add" ]; then
+        m_add=1
+    elif [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$arg" = "diff" ]; then
+        m_diff=1
+    elif [ "$m_add" = 1 ]; then
+        config_add="$arg"
+        m_add="c"
+    elif [ "$m_diff" = 1 ]; then
+        owner="$arg"
+        m_diff=2
+    elif [ "$m_diff" = 2 ]; then
+        repo="$arg"
+        m_diff=3
+    elif [ "$m_diff" = 3 ]; then
+        branch="$arg"
+        m_diff=4
+    elif [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+        show_usage
+        exit 0
+    else
+        show_usage
+        exit 1
+    fi
+done
+
+if [ "$m_add" = 0 ] && [ "$m_diff" = 0 ]; then
+    cd "$repodir"
+    diff_branches
+    cd "$m_start_dir"
+elif [ "$m_add" = "c" ]; then
+    add_repo_guess "$config_add"
+elif [ "$m_diff" = 4 ]; then
+    cd "$repodir"
+    diff_full_branch "$owner" "$repo" "$branch"
+    cd "$m_start_dir"
+else
+    show_usage
+    exit 1
+fi
+
+exit 0
