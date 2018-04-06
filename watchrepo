@@ -271,8 +271,12 @@ add_repo() {
         mkdir -p "$owner"
         git submodule add "$address" "$module"
         cd "$module"
+        deleteme="$(git branch | sed 's/\* //')"
         git checkout --orphan $hidden_branch 2> /dev/null
+        git rm -rf .
+        git add -A
         git commit --allow-empty -m "Placeholder empty branch"
+        git branch -D "$deleteme"
     fi
 
     echo -e $CL_OUT"Updating remote..."$CL_CLR
