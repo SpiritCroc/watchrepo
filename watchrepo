@@ -10,6 +10,7 @@ repodir="$workdir/repo"
 hidden_branch="nevereverchangethishiddenbranch"
 
 m_add=0
+m_remove=0
 config_add=""
 m_diff=0
 
@@ -26,7 +27,7 @@ CL_SAME="$CL_CYAN"
 CL_WRN="$CL_RED$CL_BOLD"
 
 show_usage() {
-    echo -e "Usage: $0 [(add ADDRESS) | list | (diff OWNER REPO BRANCH)]"
+    echo -e "Usage: $0 [(add ADDRESS) | list | (diff OWNER REPO BRANCH) | (remove OWNER REPO BRANCH)]"
     echo -e
     echo -e "Example add usage:"
     echo -e "\t$0 add https://github.com/sonyxperiadev/local_manifests/commits/master"
@@ -284,6 +285,26 @@ add_repo() {
     cd "$m_start_dir"
 }
 
+# Only call if $PWD = $repodir !
+remove_repo() {
+    owner="$1"
+    repo="$2"
+    branch="$3"
+    cd "$owner/$repo" || return $?
+    ensure_hidden_branch
+    if [ "$(git branch | wc -l)" -gt 2 ]; then
+        git branch -D "$branch"
+        cd ../..
+    else
+        cd ../..
+        git submodule deinit -f "$owner/$repo"
+        rm -rf .git/modules/"$owner/$repo"
+        git rm -f "$owner/$repo"
+    fi
+}
+
+
+
 m_start_dir="$PWD"
 mkdir -p "$workdir" || exit 1
 
@@ -298,13 +319,15 @@ if [ ! -d "$repodir" ]; then
 fi
 
 for arg; do
-    if [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$arg" = "list" ]; then
+    if [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$m_remove" = 0 ] && [ "$arg" = "list" ]; then
         list_diff
         exit 0
-    elif [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$arg" = "add" ]; then
+    elif [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$m_remove" = 0 ] && [ "$arg" = "add" ]; then
         m_add=1
-    elif [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$arg" = "diff" ]; then
+    elif [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$m_remove" = 0 ] && [ "$arg" = "diff" ]; then
         m_diff=1
+    elif [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$m_remove" = 0 ] && [ "$arg" = "remove" ]; then
+        m_remove=1
     elif [ "$m_add" = 1 ]; then
         config_add="$arg"
         m_add="c"
@@ -317,6 +340,15 @@ for arg; do
     elif [ "$m_diff" = 3 ]; then
         branch="$arg"
         m_diff=4
+    elif [ "$m_remove" = 1 ]; then
+        owner="$arg"
+        m_remove=2
+    elif [ "$m_remove" = 2 ]; then
+        repo="$arg"
+        m_remove=3
+    elif [ "$m_remove" = 3 ]; then
+        branch="$arg"
+        m_remove=4
     elif [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
         show_usage
         exit 0
@@ -326,7 +358,7 @@ for arg; do
     fi
 done
 
-if [ "$m_add" = 0 ] && [ "$m_diff" = 0 ]; then
+if [ "$m_add" = 0 ] && [ "$m_diff" = 0 ] && [ "$m_remove" = 0 ]; then
     cd "$repodir"
     diff_branches
     cd "$m_start_dir"
@@ -335,6 +367,10 @@ elif [ "$m_add" = "c" ]; then
 elif [ "$m_diff" = 4 ]; then
     cd "$repodir"
     diff_full_branch "$owner" "$repo" "$branch"
+    cd "$m_start_dir"
+elif [ "$m_remove" = 4 ]; then
+    cd "$repodir"
+    remove_repo "$owner" "$repo" "$branch"
     cd "$m_start_dir"
 else
     show_usage
