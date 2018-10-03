@@ -216,6 +216,14 @@ add_repo_guess() {
     echo "Branch: $branch"
     unset REPLY
     read -p "Is this correct? [Y/n]: "
+    if [ -z "$address" ]; then
+        echo "Invalid address!"
+        exit 1
+    fi
+    if [ -z "$branch" ]; then
+        echo "Invalid branch!"
+        exit 1
+    fi
     if [ "$REPLY" = "n" ] || [ "$REPLY" = "N" ]; then
         add_repo_prompt $owner $repo $branch $address
     else
