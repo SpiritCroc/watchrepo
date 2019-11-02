@@ -119,6 +119,11 @@ diff_full_branch() {
                 git log "$commit" -n 1 --format=oneline
             done <<< "$added"
         fi
+        unset REPLY
+        read -p "d for full diff, enter to continue: "
+        if [ "$REPLY" = "d" ]; then
+            git diff "$local_rev".."$remote_rev"
+        fi
         if [ ! -z "$removed" ]; then
             echo $CL_OUT"Removed commits (old->new): $(diff_full_commit_help)"$CL_CLR
             while read commit; do
