@@ -1,8 +1,10 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Author:
 # SpiritCroc <spiritcroc@gmail.com>
 #
+
+set -e
 
 workdir="$HOME/.watchrepo2"
 repodir="$workdir/repo"
